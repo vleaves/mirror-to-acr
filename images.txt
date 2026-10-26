@@ -8,4 +8,4 @@ tailscale/tailscale:latest
 vaultwarden/server:latest
 whyour/qinglong:latest
 portainer/portainer-ee:latest
-docker.gitea.com/gitea:latest-rootless
+gitea/gitea:latest-rootless
