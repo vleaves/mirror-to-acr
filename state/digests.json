@@ -2,5 +2,11 @@
   "dr34m/tao-sync:latest": "sha256:c65a935e0de1505cde6887b32ed0fcaa19a0cc834f41d5bfa583a4cf22fd9bf7",
   "garethgeorge/backrest:latest": "sha256:b852979754281026230cc69fb11428e6d57c9a97784ab4a444ffc7934c53a215",
   "joeanamier/tiktok-downloader:latest": "sha256:40ed4c5e34378a360cd334fd5271a7be25213d12ae9aa708fd9a597e49022e79",
-  "portainer/portainer-ee:latest": "sha256:8166e2376756d1ad3194e336cd1707c28a5764af7acc8bb9f21a5f28d1903566"
+  "openlistteam/openlist:latest": "sha256:897563beb674e7ad04edff14b0037dc8443ca3978570614005519df7eae06434",
+  "portainer/portainer-ee:latest": "sha256:8166e2376756d1ad3194e336cd1707c28a5764af7acc8bb9f21a5f28d1903566",
+  "rustfs/rustfs:latest": "sha256:ed9210d6411d77ffceb70d94b964a3cb7d225983368bc25bebe01e995293dcc2",
+  "syncthing/syncthing:latest": "sha256:2b71da7c0d0a91a6ae5285ad079226fecc0a365d08b27720e1f7037b018f7546",
+  "tailscale/tailscale:latest": "sha256:b11583ad2e93e4671128538c88cf11f460444a5d7e449311dd1933a400ab849d",
+  "vaultwarden/server:latest": "sha256:efb3cde962015fcc036b2ea625242248611943b27212ebf4392841fb30fad055",
+  "whyour/qinglong:latest": "sha256:3e3971e78edbb5a6a6900bdfb7cd37352a535416f7ad2451747e601a7558d400"
 }
