@@ -1,50 +1,44 @@
 
-name: Mirror Docker Hub Image to Alibaba ACR
+name: Sync Docker Hub Images to Alibaba ACR
 
 on:
+  schedule:
+    # Every day at 02:00 UTC = 10:00 Beijing time
+    - cron: "0 2 * * *"
+
+  push:
+    branches:
+      - main
+    paths:
+      - "images.txt"
+      - ".github/workflows/sync-images.yml"
+
   workflow_dispatch:
-    inputs:
-      image:
-        description: "Docker Hub image, e.g. nginx or bitnami/redis"
-        required: true
-        type: string
-      tag:
-        description: "Image tag"
-        required: true
-        default: "latest"
-        type: string
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: docker-hub-to-acr-sync
+  cancel-in-progress: false
 
 jobs:
-  mirror:
+  sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 180
 
     steps:
-      - name: Validate input
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Install Skopeo
         shell: bash
-        env:
-          IMAGE: ${{ inputs.image }}
-          TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-
-          if [[ ! "$IMAGE" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
-            echo "Invalid image name: $IMAGE"
-            exit 1
-          fi
-
-          if [[ "$IMAGE" == */*/* ]]; then
-            echo "Please enter a Docker Hub image name without registry hostname"
-            exit 1
-          fi
-
-          if [[ ! "$TAG" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]]; then
-            echo "Invalid image tag: $TAG"
-            exit 1
-          fi
+          sudo apt-get update
+          sudo apt-get install -y skopeo
 
       - name: Login to Alibaba Cloud ACR
         uses: docker/login-action@v3
@@ -53,34 +47,260 @@ jobs:
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
-      - name: Pull, tag and push
+      - name: Check and sync images
+        id: sync
         shell: bash
         env:
-          IMAGE: ${{ inputs.image }}
-          TAG: ${{ inputs.tag }}
           ACR_REGISTRY: ${{ secrets.ACR_REGISTRY }}
           ACR_NAMESPACE: ${{ secrets.ACR_NAMESPACE }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
 
-          # Official Docker Hub images such as nginx
-          if [[ "$IMAGE" != */* ]]; then
-            SOURCE="docker.io/library/${IMAGE}:${TAG}"
-            REPO="${IMAGE}"
-          else
-            SOURCE="docker.io/${IMAGE}:${TAG}"
-            REPO="${IMAGE}"
+          mkdir -p state
+
+          if [[ ! -f state/digests.json ]]; then
+            echo '{}' > state/digests.json
           fi
 
-          TARGET="${ACR_REGISTRY}/${ACR_NAMESPACE}/${REPO}:${TAG}"
+          UPDATED="$RUNNER_TEMP/updated.txt"
+          UNCHANGED="$RUNNER_TEMP/unchanged.txt"
+          FAILED="$RUNNER_TEMP/failed.txt"
 
-          echo "Source: $SOURCE"
-          echo "Target: $TARGET"
+          : > "$UPDATED"
+          : > "$UNCHANGED"
+          : > "$FAILED"
 
-          docker pull "$SOURCE"
-          docker tag "$SOURCE" "$TARGET"
-          docker push "$TARGET"
+          # Authenticate Skopeo to ACR using Docker login credentials.
+          AUTH_FILE="$RUNNER_TEMP/containers-auth.json"
+          if ! skopeo login \
+            --authfile "$AUTH_FILE" \
+            --username "$ACR_USERNAME" \
+            --password "$ACR_PASSWORD" \
+            "$ACR_REGISTRY"; then
+            echo "ACR login failed"
+            exit 1
+          fi
 
-          echo "Successfully mirrored: $TARGET"
+          # Read a JSON key from the local state file.
+          get_saved_digest() {
+            python3 - "$1" <<'PY'
+          import json
+          import sys
 
-          docker image rm "$SOURCE" "$TARGET" || true
+          path, key = "state/digests.json", sys.argv[1]
+          with open(path, encoding="utf-8") as f:
+              data = json.load(f)
+          print(data.get(key, ""))
+          PY
+          }
+
+          # Persist only successfully synced source digests.
+          save_digest() {
+            python3 - "$1" "$2" <<'PY'
+          import json
+          import os
+          import sys
+
+          key, digest = sys.argv[1], sys.argv[2]
+          path = "state/digests.json"
+
+          with open(path, encoding="utf-8") as f:
+              data = json.load(f)
+
+          data[key] = digest
+          temp = path + ".tmp"
+
+          with open(temp, "w", encoding="utf-8") as f:
+              json.dump(data, f, indent=2, sort_keys=True)
+              f.write("\n")
+
+          os.replace(temp, path)
+          PY
+          }
+
+          while IFS= read -r line || [[ -n "$line" ]]; do
+            line="${line%$'\r'}"
+            line="$(echo "$line" | xargs)"
+
+            [[ -z "$line" || "$line" == \#* ]] && continue
+
+            # Accept Docker Hub image names only.
+            if [[ "$line" == *@* ||
+                  "$line" == */*/* ||
+                  ! "$line" =~ ^[a-zA-Z0-9._/-]+(:[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127})?$ ]]; then
+              echo "$line - invalid image reference" >> "$FAILED"
+              continue
+            fi
+
+            # Default tag to latest.
+            if [[ "${line##*/}" != *:* ]]; then
+              line="${line}:latest"
+            fi
+
+            # Normalize official Docker Hub images.
+            if [[ "$line" != */* ]]; then
+              SOURCE="docker.io/library/$line"
+              REPO="library/$line"
+            else
+              SOURCE="docker.io/$line"
+              REPO="$line"
+            fi
+
+            TARGET="$ACR_REGISTRY/$ACR_NAMESPACE/$REPO"
+
+            echo ""
+            echo "===================================="
+            echo "Source: $SOURCE"
+            echo "Target: $TARGET"
+
+            # Get the top-level manifest/index digest.
+            # This inspects registry metadata without pulling image layers.
+            if ! SOURCE_DIGEST=$(
+              skopeo inspect --raw "docker://$SOURCE" |
+              sha256sum | awk '{print "sha256:" $1}'
+            ); then
+              echo "$line - Docker Hub inspection failed" >> "$FAILED"
+              continue
+            fi
+
+            SAVED_DIGEST="$(get_saved_digest "$line")"
+
+            # First sync or changed source image.
+            if [[ -n "$SAVED_DIGEST" &&
+                  "$SOURCE_DIGEST" == "$SAVED_DIGEST" ]]; then
+              echo "Unchanged: $line"
+              echo "$line" >> "$UNCHANGED"
+              continue
+            fi
+
+            echo "Changed or first sync: $line"
+
+            # Copy all architectures, preserving manifest digests.
+            if skopeo copy \
+              --all \
+              --preserve-digests \
+              --authfile "$AUTH_FILE" \
+              "docker://$SOURCE" \
+              "docker://$TARGET"; then
+
+              # Update state only after a successful copy.
+              if save_digest "$line" "$SOURCE_DIGEST"; then
+                echo "Updated: $TARGET"
+                echo "$line" >> "$UPDATED"
+              else
+                echo "$line - failed to save digest" >> "$FAILED"
+              fi
+            else
+              echo "$line - ACR copy failed" >> "$FAILED"
+            fi
+
+          done < images.txt
+
+          # Commit updated state so future scheduled runs can use it.
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add state/digests.json
+
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: update synced image digests"
+            if ! git push origin HEAD:main; then
+              echo "Failed to push digest state to GitHub"
+              echo "Digest state commit failed" >> "$FAILED"
+            fi
+          fi
+
+          echo "Updated: $(wc -l < "$UPDATED")"
+          echo "Unchanged: $(wc -l < "$UNCHANGED")"
+          echo "Failed: $(wc -l < "$FAILED")"
+
+          {
+            echo "## Docker Hub → Alibaba ACR"
+            echo "- Updated: $(wc -l < "$UPDATED")"
+            echo "- Unchanged: $(wc -l < "$UNCHANGED")"
+            echo "- Failed: $(wc -l < "$FAILED")"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ -s "$FAILED" ]]; then
+            exit 1
+          fi
+
+      - name: Notify WeCom
+        if: always()
+        shell: bash
+        env:
+          WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+
+          def read_items(name):
+              path = root / name
+              if not path.exists():
+                  return []
+              return [
+                  x.strip()
+                  for x in path.read_text().splitlines()
+                  if x.strip()
+              ]
+
+          updated = read_items("updated.txt")
+          unchanged = read_items("unchanged.txt")
+          failed = read_items("failed.txt")
+          status = os.environ.get("JOB_STATUS", "unknown")
+          webhook = os.environ.get("WEBHOOK_URL", "")
+
+          def section(title, items):
+              if not items:
+                  return ""
+              text = "\n".join(
+                  f"> {item}" for item in items[:30]
+              )
+              if len(items) > 30:
+                  text += f"\n> ...另外 {len(items) - 30} 个"
+              return f"\n### {title} ({len(items)})\n{text}\n"
+
+          content = (
+              "## Docker Hub → 阿里云 ACR 同步报告\n"
+              f"> 工作流状态：{status}\n"
+              f"> 更新：{len(updated)} | "
+              f"未变化：{len(unchanged)} | "
+              f"失败：{len(failed)}\n"
+              + section("已更新", updated)
+              + section("无变化", unchanged)
+              + section("失败", failed)
+          )
+
+          if not webhook:
+              print("WECHAT_WEBHOOK_URL not configured")
+              raise SystemExit(1)
+
+          payload = {
+              "msgtype": "markdown",
+              "markdown": {"content": content}
+          }
+
+          request = urllib.request.Request(
+              webhook,
+              data=json.dumps(payload).encode("utf-8"),
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+
+          with urllib.request.urlopen(request, timeout=15) as response:
+              result = json.loads(
+                  response.read().decode("utf-8")
+              )
+
+          if result.get("errcode", 0) != 0:
+              raise RuntimeError(f"WeCom API error: {result}")
+
+          print("WeCom notification sent")
+          PY
