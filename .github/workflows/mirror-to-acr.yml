@@ -1,0 +1,86 @@
+
+name: Mirror Docker Hub Image to Alibaba ACR
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Docker Hub image, e.g. nginx or bitnami/redis"
+        required: true
+        type: string
+      tag:
+        description: "Image tag"
+        required: true
+        default: "latest"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Validate input
+        shell: bash
+        env:
+          IMAGE: ${{ inputs.image }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$IMAGE" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+            echo "Invalid image name: $IMAGE"
+            exit 1
+          fi
+
+          if [[ "$IMAGE" == */*/* ]]; then
+            echo "Please enter a Docker Hub image name without registry hostname"
+            exit 1
+          fi
+
+          if [[ ! "$TAG" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]]; then
+            echo "Invalid image tag: $TAG"
+            exit 1
+          fi
+
+      - name: Login to Alibaba Cloud ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ACR_REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Pull, tag and push
+        shell: bash
+        env:
+          IMAGE: ${{ inputs.image }}
+          TAG: ${{ inputs.tag }}
+          ACR_REGISTRY: ${{ secrets.ACR_REGISTRY }}
+          ACR_NAMESPACE: ${{ secrets.ACR_NAMESPACE }}
+        run: |
+          set -euo pipefail
+
+          # Official Docker Hub images such as nginx
+          if [[ "$IMAGE" != */* ]]; then
+            SOURCE="docker.io/library/${IMAGE}:${TAG}"
+            REPO="${IMAGE}"
+          else
+            SOURCE="docker.io/${IMAGE}:${TAG}"
+            REPO="${IMAGE}"
+          fi
+
+          TARGET="${ACR_REGISTRY}/${ACR_NAMESPACE}/${REPO}:${TAG}"
+
+          echo "Source: $SOURCE"
+          echo "Target: $TARGET"
+
+          docker pull "$SOURCE"
+          docker tag "$SOURCE" "$TARGET"
+          docker push "$TARGET"
+
+          echo "Successfully mirrored: $TARGET"
+
+          docker image rm "$SOURCE" "$TARGET" || true
