@@ -1,4 +1,3 @@
-# Docker Hub官方镜像
 garethgeorge/backrest:latest
 dr34m/tao-sync:latest
 joeanamier/tiktok-downloader:latest
@@ -10,4 +9,3 @@ vaultwarden/server:latest
 whyour/qinglong:latest
 portainer/portainer-ee:latest
 
-docker.gitea.com/gitea:latest-rootless
