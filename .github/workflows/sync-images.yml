@@ -234,6 +234,15 @@ jobs:
               if save_digest "$line" "$SOURCE_DIGEST"; then
                 echo "Updated: $TARGET"
                 echo "$line" >> "$UPDATED"
+
+                # Add one GitHub Actions summary entry immediately per successful image sync.
+                {
+                  echo "### 镜像同步成功"
+                  echo "- 源镜像：$SOURCE"
+                  echo "- 目标镜像：$TARGET"
+                  echo "- Digest：$SOURCE_DIGEST"
+                  echo ""
+                } >> "$GITHUB_STEP_SUMMARY"
               else
                 echo "$line - failed to save digest" >> "$FAILED"
                 echo "镜像已复制，但保存 Digest 失败：$line"
@@ -267,13 +276,6 @@ jobs:
           echo "Updated: $(wc -l < "$UPDATED")"
           echo "Unchanged: $(wc -l < "$UNCHANGED")"
           echo "Failed: $(wc -l < "$FAILED")"
-
-          {
-            echo "## Docker Hub → Alibaba ACR"
-            echo "- Updated: $(wc -l < "$UPDATED")"
-            echo "- Unchanged: $(wc -l < "$UNCHANGED")"
-            echo "- Failed: $(wc -l < "$FAILED")"
-          } >> "$GITHUB_STEP_SUMMARY"
 
           if [[ -s "$FAILED" ]]; then
             exit 1
