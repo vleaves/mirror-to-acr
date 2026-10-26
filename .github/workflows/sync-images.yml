@@ -226,6 +226,7 @@ jobs:
             # Copy all architectures.
             if skopeo copy \
               --all \
+              --format v2s2 \
               --preserve-digests \
               --authfile "$AUTH_FILE" \
               "docker://$SOURCE" \
