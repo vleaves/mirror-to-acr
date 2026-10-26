@@ -1,4 +1,3 @@
-
 name: Sync Docker Hub Images to Alibaba ACR
 
 on:
@@ -49,47 +48,71 @@ jobs:
           ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
           ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
         run: |
-          set -uo pipefail
+          set -euo pipefail
 
           mkdir -p state
-
-          if [[ ! -f state/digests.json ]]; then
-            echo '{}' > state/digests.json
-          fi
 
           UPDATED="$RUNNER_TEMP/updated.txt"
           UNCHANGED="$RUNNER_TEMP/unchanged.txt"
           FAILED="$RUNNER_TEMP/failed.txt"
+          AUTH_FILE="$RUNNER_TEMP/containers-auth.json"
 
           : > "$UPDATED"
           : > "$UNCHANGED"
           : > "$FAILED"
 
-          # Authenticate Skopeo to ACR using Docker login credentials.
-          AUTH_FILE="$RUNNER_TEMP/containers-auth.json"
-          if ! skopeo login \
-            --authfile "$AUTH_FILE" \
-            --username "$ACR_USERNAME" \
-            --password "$ACR_PASSWORD" \
-            "$ACR_REGISTRY"; then
-            echo "ACR login failed"
+          # Validate required secrets without printing their values.
+          if [[ -z "${ACR_REGISTRY:-}" ||
+                -z "${ACR_NAMESPACE:-}" ||
+                -z "${ACR_USERNAME:-}" ||
+                -z "${ACR_PASSWORD:-}" ]]; then
+            echo "Missing required ACR GitHub Secrets." >> "$FAILED"
+            echo "错误：ACR 配置不完整，请检查 GitHub Secrets。"
             exit 1
           fi
 
-          # Read a JSON key from the local state file.
+          # Normalize registry address.
+          ACR_REGISTRY="${ACR_REGISTRY#https://}"
+          ACR_REGISTRY="${ACR_REGISTRY#http://}"
+          ACR_REGISTRY="${ACR_REGISTRY%/}"
+
+          # Initialize digest state.
+          if [[ ! -f state/digests.json ]]; then
+            echo '{}' > state/digests.json
+          fi
+
+          if ! python3 -m json.tool state/digests.json >/dev/null 2>&1; then
+            echo "state/digests.json is invalid JSON" >> "$FAILED"
+            echo "错误：state/digests.json 格式无效。"
+            exit 1
+          fi
+
+          # Login to ACR.
+          if ! printf '%s' "$ACR_PASSWORD" |
+            skopeo login \
+              --authfile "$AUTH_FILE" \
+              --username "$ACR_USERNAME" \
+              --password-stdin \
+              "$ACR_REGISTRY"; then
+            echo "ACR login failed; check registry credentials and permissions." >> "$FAILED"
+            echo "错误：ACR 登录失败，请检查地址、账号和密码。"
+            exit 1
+          fi
+
+          # Read a saved digest by source image name.
           get_saved_digest() {
             python3 - "$1" <<'PY'
           import json
           import sys
 
-          path, key = "state/digests.json", sys.argv[1]
-          with open(path, encoding="utf-8") as f:
+          key = sys.argv[1]
+          with open("state/digests.json", encoding="utf-8") as f:
               data = json.load(f)
           print(data.get(key, ""))
           PY
           }
 
-          # Persist only successfully synced source digests.
+          # Save a digest only after a successful copy.
           save_digest() {
             python3 - "$1" "$2" <<'PY'
           import json
@@ -113,17 +136,22 @@ jobs:
           PY
           }
 
+          # Detect flattened target-name collisions.
+          declare -A TARGET_OWNER=()
+
           while IFS= read -r line || [[ -n "$line" ]]; do
             line="${line%$'\r'}"
             line="$(echo "$line" | xargs)"
 
             [[ -z "$line" || "$line" == \#* ]] && continue
 
-            # Accept Docker Hub image names only.
+            # Only accept Docker Hub image references:
+            # image[:tag] or namespace/image[:tag].
             if [[ "$line" == *@* ||
                   "$line" == */*/* ||
                   ! "$line" =~ ^[a-zA-Z0-9._/-]+(:[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127})?$ ]]; then
               echo "$line - invalid image reference" >> "$FAILED"
+              echo "无效的镜像名称：$line"
               continue
             fi
 
@@ -132,35 +160,60 @@ jobs:
               line="${line}:latest"
             fi
 
-            # Normalize official Docker Hub images.
+            # Normalize Docker Hub source.
             if [[ "$line" != */* ]]; then
               SOURCE="docker.io/library/$line"
-              REPO="library/$line"
             else
               SOURCE="docker.io/$line"
-              REPO="$line"
             fi
 
-            TARGET="$ACR_REGISTRY/$ACR_NAMESPACE/$REPO"
+            # ACR only supports namespace/image:tag.
+            # Flatten the Docker Hub path to its final image component.
+            IMAGE_NAME="${line##*/}"
+            TARGET="$ACR_REGISTRY/$ACR_NAMESPACE/$IMAGE_NAME"
+
+            # Prevent two different source images from overwriting
+            # the same flattened ACR target during this run.
+            if [[ -n "${TARGET_OWNER[$TARGET]:-}" &&
+                  "${TARGET_OWNER[$TARGET]}" != "$line" ]]; then
+              echo "$line - target collision: $TARGET is also used by ${TARGET_OWNER[$TARGET]}" >> "$FAILED"
+              echo "目标镜像冲突：$line -> $TARGET"
+              continue
+            fi
+            TARGET_OWNER["$TARGET"]="$line"
 
             echo ""
             echo "===================================="
             echo "Source: $SOURCE"
             echo "Target: $TARGET"
 
-            # Get the top-level manifest/index digest.
-            # This inspects registry metadata without pulling image layers.
-            if ! SOURCE_DIGEST=$(
-              skopeo inspect --raw "docker://$SOURCE" |
-              sha256sum | awk '{print "sha256:" $1}'
-            ); then
+            # Fetch the raw top-level manifest/index.
+            # Check the command separately so failures are not
+            # accidentally converted into a digest of empty input.
+            RAW_FILE="$RUNNER_TEMP/source-manifest.json"
+
+            if ! skopeo inspect --raw "docker://$SOURCE" > "$RAW_FILE"; then
               echo "$line - Docker Hub inspection failed" >> "$FAILED"
+              echo "获取源镜像信息失败：$line"
               continue
             fi
 
-            SAVED_DIGEST="$(get_saved_digest "$line")"
+            if [[ ! -s "$RAW_FILE" ]] ||
+               ! python3 -m json.tool "$RAW_FILE" >/dev/null 2>&1; then
+              echo "$line - source manifest is empty or invalid" >> "$FAILED"
+              echo "源镜像返回的 Manifest 为空或格式无效：$line"
+              continue
+            fi
 
-            # First sync or changed source image.
+            SOURCE_DIGEST="sha256:$(sha256sum "$RAW_FILE" | awk '{print $1}')"
+
+            if ! SAVED_DIGEST="$(get_saved_digest "$line")"; then
+              echo "$line - failed to read saved digest" >> "$FAILED"
+              echo "读取历史 Digest 失败：$line"
+              continue
+            fi
+
+            # Skip unchanged images.
             if [[ -n "$SAVED_DIGEST" &&
                   "$SOURCE_DIGEST" == "$SAVED_DIGEST" ]]; then
               echo "Unchanged: $line"
@@ -170,7 +223,7 @@ jobs:
 
             echo "Changed or first sync: $line"
 
-            # Copy all architectures, preserving manifest digests.
+            # Copy all architectures.
             if skopeo copy \
               --all \
               --preserve-digests \
@@ -178,34 +231,39 @@ jobs:
               "docker://$SOURCE" \
               "docker://$TARGET"; then
 
-              # Update state only after a successful copy.
               if save_digest "$line" "$SOURCE_DIGEST"; then
                 echo "Updated: $TARGET"
                 echo "$line" >> "$UPDATED"
               else
                 echo "$line - failed to save digest" >> "$FAILED"
+                echo "镜像已复制，但保存 Digest 失败：$line"
               fi
             else
               echo "$line - ACR copy failed" >> "$FAILED"
+              echo "镜像复制失败：$line"
             fi
 
           done < images.txt
 
-          # Commit updated state so future scheduled runs can use it.
+          # Commit and push the updated digest state.
           git config user.name "github-actions[bot]"
-          git config user.email \
-            "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add state/digests.json
 
           if ! git diff --cached --quiet; then
-            git commit -m "chore: update synced image digests"
-            if ! git push origin HEAD:main; then
-              echo "Failed to push digest state to GitHub"
-              echo "Digest state commit failed" >> "$FAILED"
+            if git commit -m "chore: update synced image digests"; then
+              if ! git push origin HEAD:main; then
+                echo "Failed to push digest state to GitHub" >> "$FAILED"
+                echo "错误：Digest 状态提交到 GitHub 失败。"
+              fi
+            else
+              echo "Failed to commit digest state" >> "$FAILED"
+              echo "错误：Digest 状态提交失败。"
             fi
           fi
 
+          echo ""
           echo "Updated: $(wc -l < "$UPDATED")"
           echo "Unchanged: $(wc -l < "$UNCHANGED")"
           echo "Failed: $(wc -l < "$FAILED")"
@@ -221,7 +279,6 @@ jobs:
             exit 1
           fi
 
-      
       - name: Notify WeCom
         if: always()
         shell: bash
@@ -243,39 +300,43 @@ jobs:
                   return []
               return [
                   line.strip()
-                  for line in path.read_text().splitlines()
+                  for line in path.read_text(encoding="utf-8").splitlines()
                   if line.strip()
               ]
 
           updated = read_items("updated.txt")
           unchanged = read_items("unchanged.txt")
           failed = read_items("failed.txt")
-
           status = os.environ.get("JOB_STATUS", "unknown")
 
           lines = []
 
+          if status != "success":
+              lines.append("镜像同步任务失败，请检查 GitHub Actions 日志。")
+              lines.append("")
+
           if updated:
               lines.append("已更新镜像：")
               lines.extend(updated)
+              lines.append("")
 
           if unchanged:
-              lines.append("")
               lines.append("无需更新镜像：")
               lines.extend(unchanged)
+              lines.append("")
 
           if failed:
-              lines.append("")
-              lines.append("同步失败镜像：")
+              lines.append("同步失败：")
               lines.extend(failed)
+              lines.append("")
 
-          if not lines:
-              lines.append("本次没有需要同步的镜像。")
+          if not updated and not unchanged and not failed:
+              if status == "success":
+                  lines.append("本次没有需要同步的镜像。")
+              else:
+                  lines.append("任务在完成镜像检查前失败，请查看 GitHub Actions 日志。")
 
-          if status != "success":
-              lines.insert(0, "镜像同步任务未完全成功，请检查日志。\n")
-
-          content = "\n".join(lines)
+          content = "\n".join(lines).strip()
 
           webhook = os.environ.get("WEBHOOK_URL", "")
           if not webhook:
@@ -283,9 +344,7 @@ jobs:
 
           payload = {
               "msgtype": "text",
-              "text": {
-                  "content": content
-              }
+              "text": {"content": content}
           }
 
           request = urllib.request.Request(
