@@ -225,9 +225,8 @@ jobs:
 
             # Copy all architectures.
             if skopeo copy \
-              --all \
-              --format v2s2 \
-              --preserve-digests \
+              --override-os linux \
+              --override-arch amd64 \
               --authfile "$AUTH_FILE" \
               "docker://$SOURCE" \
               "docker://$TARGET"; then
@@ -241,6 +240,7 @@ jobs:
                   echo "### 镜像同步成功"
                   echo "- 源镜像：$SOURCE"
                   echo "- 目标镜像：$TARGET"
+                  echo "- 架构：linux/amd64"
                   echo "- Digest：$SOURCE_DIGEST"
                   echo ""
                 } >> "$GITHUB_STEP_SUMMARY"
