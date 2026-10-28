@@ -9,4 +9,4 @@ vaultwarden/server:latest
 whyour/qinglong:latest
 portainer/portainer-ee:latest
 gitea/gitea:latest-rootless
-homeassistant/home-assistant:latest
+homeassistant/home-assistant:stable
