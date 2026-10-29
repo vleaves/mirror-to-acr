@@ -7,7 +7,7 @@
   "portainer/portainer-ee:latest": "sha256:8166e2376756d1ad3194e336cd1707c28a5764af7acc8bb9f21a5f28d1903566",
   "rustfs/rustfs:latest": "sha256:ed9210d6411d77ffceb70d94b964a3cb7d225983368bc25bebe01e995293dcc2",
   "syncthing/syncthing:latest": "sha256:2b71da7c0d0a91a6ae5285ad079226fecc0a365d08b27720e1f7037b018f7546",
-  "tailscale/tailscale:latest": "sha256:b11583ad2e93e4671128538c88cf11f460444a5d7e449311dd1933a400ab849d",
+  "tailscale/tailscale:latest": "sha256:ed6480b33c6eb67c9cbd203ed42b9fb57e361986725b6856def71b7a3d9e276c",
   "vaultwarden/server:latest": "sha256:efb3cde962015fcc036b2ea625242248611943b27212ebf4392841fb30fad055",
-  "whyour/qinglong:latest": "sha256:3e3971e78edbb5a6a6900bdfb7cd37352a535416f7ad2451747e601a7558d400"
+  "whyour/qinglong:latest": "sha256:2431b8b92d5822423d7d598110294691ae2a32d7fbde5c5d5a963db8b4f47cc3"
 }
