@@ -2,6 +2,7 @@
   "dr34m/tao-sync:latest": "sha256:c65a935e0de1505cde6887b32ed0fcaa19a0cc834f41d5bfa583a4cf22fd9bf7",
   "garethgeorge/backrest:latest": "sha256:b852979754281026230cc69fb11428e6d57c9a97784ab4a444ffc7934c53a215",
   "gitea/gitea:latest-rootless": "sha256:94807314454f6525994a3b76286ba12bc7e7f8cd14f61d9e67431767f8103306",
+  "homeassistant/home-assistant:latest": "sha256:23f4dfbb69ce76315dbc4de7915504f1c2dcecd7ca2648113a493a385972e133",
   "joeanamier/tiktok-downloader:latest": "sha256:40ed4c5e34378a360cd334fd5271a7be25213d12ae9aa708fd9a597e49022e79",
   "openlistteam/openlist:latest": "sha256:897563beb674e7ad04edff14b0037dc8443ca3978570614005519df7eae06434",
   "portainer/portainer-ee:latest": "sha256:8166e2376756d1ad3194e336cd1707c28a5764af7acc8bb9f21a5f28d1903566",
