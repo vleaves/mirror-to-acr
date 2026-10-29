@@ -230,6 +230,42 @@ jobs:
               --authfile "$AUTH_FILE" \
               "docker://$SOURCE" \
               "docker://$TARGET"; then
+              echo "Skopeo copy 成功：$TARGET"
+
+            else
+              echo "Skopeo copy 失败，尝试 Docker pull/push：$SOURCE -> $TARGET"
+
+              # 1. 登录目标镜像仓库
+              if ! echo "$ACR_PASSWORD" | docker login "$ACR_REGISTRY" \
+                -u "$ACR_USERNAME" --password-stdin; then
+                echo "$line - Docker target login failed" >> "$FAILED"
+                echo "目标仓库 Docker 登录失败：$ACR_REGISTRY"
+                continue
+              fi
+
+              # 3. 拉取 amd64 镜像
+              if ! docker pull --platform linux/amd64 "$SOURCE"; then
+                echo "$line - Docker pull failed" >> "$FAILED"
+                echo "Docker pull 失败：$SOURCE"
+                continue
+              fi
+
+              # 4. 重新打标签
+              if ! docker tag "$SOURCE" "$TARGET"; then
+                echo "$line - Docker tag failed" >> "$FAILED"
+                echo "Docker tag 失败：$SOURCE -> $TARGET"
+                continue
+              fi
+
+              # 5. 推送目标仓库
+              if ! docker push "$TARGET"; then
+                echo "$line - Docker push failed" >> "$FAILED"
+                echo "Docker push 失败：$TARGET"
+                continue
+              fi
+
+              echo "Docker pull/push 成功：$TARGET"
+            fi
 
               if save_digest "$line" "$SOURCE_DIGEST"; then
                 echo "Updated: $TARGET"
