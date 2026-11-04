@@ -1,10 +1,11 @@
-name: Sync Docker Hub Images to Alibaba ACR
+name: Sync Images to ACR
 
 on:
   schedule:
     # Every day at 02:00 UTC = 10:00 Beijing time
     - cron: "0 2 * * *"
-
+  workflow_dispatch:
+  
   push:
     branches:
       - main
