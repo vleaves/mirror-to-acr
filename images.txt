@@ -11,3 +11,4 @@ portainer/portainer-ee:latest
 gitea/gitea:latest-rootless
 homeassistant/home-assistant:latest
 linuxserver/qbittorrent:latest
+rustdesk/rustdesk-server:latest 
