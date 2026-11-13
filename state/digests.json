@@ -2,15 +2,15 @@
   "dr34m/tao-sync:latest": "sha256:c65a935e0de1505cde6887b32ed0fcaa19a0cc834f41d5bfa583a4cf22fd9bf7",
   "garethgeorge/backrest:latest": "sha256:b852979754281026230cc69fb11428e6d57c9a97784ab4a444ffc7934c53a215",
   "gitea/gitea:latest-rootless": "sha256:40c5a68a0463c0940e1ae32626c8300dd0572f3558e390073ad8379ca67c0e1d",
-  "homeassistant/home-assistant:latest": "sha256:c6c1ca9931036bf3a2c4cc088d8db25dfea3b33935a5ecc83c40349462e2f69e",
+  "homeassistant/home-assistant:latest": "sha256:6785d1eca68747a524c156faae1b139ed415c07357386ae6fe17291986e59e82",
   "joeanamier/tiktok-downloader:latest": "sha256:40ed4c5e34378a360cd334fd5271a7be25213d12ae9aa708fd9a597e49022e79",
   "linuxserver/qbittorrent:latest": "sha256:3d4c4545d51a690a0df15a2ff99038823a88a9822df8e794526447b9afbd7384",
   "openlistteam/openlist:latest": "sha256:897563beb674e7ad04edff14b0037dc8443ca3978570614005519df7eae06434",
   "portainer/portainer-ee:latest": "sha256:8166e2376756d1ad3194e336cd1707c28a5764af7acc8bb9f21a5f28d1903566",
   "rustdesk/rustdesk-server:latest": "sha256:8ecdab65deb7c84652a626380e31d11a8f1fbafd97916d57f95c20628f943c00",
-  "rustfs/rustfs:latest": "sha256:ed9210d6411d77ffceb70d94b964a3cb7d225983368bc25bebe01e995293dcc2",
+  "rustfs/rustfs:latest": "sha256:b81d16a90ee25bd9511280127ca1471788c6e874cf0f0da759645f46b2dc1d74",
   "syncthing/syncthing:latest": "sha256:2b71da7c0d0a91a6ae5285ad079226fecc0a365d08b27720e1f7037b018f7546",
-  "tailscale/tailscale:latest": "sha256:ed6480b33c6eb67c9cbd203ed42b9fb57e361986725b6856def71b7a3d9e276c",
+  "tailscale/tailscale:latest": "sha256:72c1e19e0aedca96b8533bbb0b4368564410ff20b17e53b804eb6c1f04a31be4",
   "vaultwarden/server:latest": "sha256:4fe17f415f90087377d37c755e0ea3cf189dcc6794e49cdd2a9adbb4937d9e1f",
   "whyour/qinglong:latest": "sha256:2431b8b92d5822423d7d598110294691ae2a32d7fbde5c5d5a963db8b4f47cc3"
 }
